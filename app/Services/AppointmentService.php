@@ -285,11 +285,13 @@ class AppointmentService
 
         if ($conflicting !== null) {
             $staffName = $staff->name;
-            $start = $conflicting->start_datetime->format('Y-m-d H:i');
-            $end = $conflicting->end_datetime->format('Y-m-d H:i');
+            // Display times in the branch's local timezone
+            $timezone = $conflicting->branch->timezone ?? 'UTC';
+            $start = $conflicting->start_datetime->copy()->setTimezone($timezone)->format('Y-m-d H:i');
+            $end = $conflicting->end_datetime->copy()->setTimezone($timezone)->format('Y-m-d H:i');
 
             throw ValidationException::withMessages([
-                'start_datetime' => ["Staff member {$staffName} has a conflicting appointment from {$start} to {$end}."],
+                'start_datetime' => ["Staff member {$staffName} has a conflicting appointment from {$start} to {$end} ({$timezone})."],
             ]);
         }
     }
