@@ -62,6 +62,9 @@ class AppointmentService
         // 5. Validate staff-branch assignment
         $this->validateStaffBranch($staff, $branch);
 
+        // 5a. Validate staff working hours (if set)
+        $this->validateStaffWorkingHours($staff, $branch, $startDatetime, $endDatetime);
+
         // 6. Validate no overlap (within transaction for locking)
         return DB::transaction(function () use ($data, $staff, $startDatetime, $endDatetime) {
             $this->validateNoOverlap($staff, $startDatetime, $endDatetime);
@@ -142,6 +145,7 @@ class AppointmentService
         // 4. Re-validate operating hours, staff-branch, and overlap (excluding self)
         $this->validateOperatingHours($branch, $startDatetime, $endDatetime);
         $this->validateStaffBranch($staff, $branch);
+        $this->validateStaffWorkingHours($staff, $branch, $startDatetime, $endDatetime);
 
         return DB::transaction(function () use ($appointment, $data, $staff, $startDatetime, $endDatetime, $branchId, $staffId, $customerId, $serviceId) {
             $this->validateNoOverlap($staff, $startDatetime, $endDatetime, $appointment->id);
@@ -226,21 +230,23 @@ class AppointmentService
     {
         $timezone = $branch->timezone;
         $startLocal = $startUtc->copy()->setTimezone($timezone);
-        $endLocal = $endUtc->copy()->setTimezone($timezone);
+        $endLocal   = $endUtc->copy()->setTimezone($timezone);
 
-        $openingTime = Carbon::parse($branch->opening_time)->format('H:i:s');
-        $closingTime = Carbon::parse($branch->closing_time)->format('H:i:s');
-
-        $startTime = $startLocal->format('H:i:s');
-        $endTime = $endLocal->format('H:i:s');
+        // Build full datetime boundaries on the appointment's local date for correct midnight-crossing comparison
+        $openingDatetime = $startLocal->copy()->setTimeFromTimeString($branch->opening_time);
+        $closingDatetime = $startLocal->copy()->setTimeFromTimeString($branch->closing_time);
+        // If closing is on or before opening, it means closing is next day (overnight branch — rare but safe)
+        if ($closingDatetime->lte($openingDatetime)) {
+            $closingDatetime->addDay();
+        }
 
         $errors = [];
 
-        if ($startTime < $openingTime) {
+        if ($startLocal->lt($openingDatetime)) {
             $errors['start_datetime'][] = "Appointment start time is before branch opening hours ({$branch->opening_time} {$timezone}).";
         }
 
-        if ($endTime > $closingTime) {
+        if ($endLocal->gt($closingDatetime)) {
             $errors['end_datetime'][] = "Appointment end time is after branch closing hours ({$branch->closing_time} {$timezone}).";
         }
 
@@ -309,6 +315,52 @@ class AppointmentService
             throw ValidationException::withMessages([
                 'staff_id' => ["Staff member {$staff->name} is not assigned to branch {$branch->name}."],
             ]);
+        }
+    }
+
+    /**
+     * Validate that the appointment fits within the staff member's working hours (if set).
+     *
+     * Uses the branch timezone for conversion, same as branch operating hours validation.
+     * Skips validation if the staff member has no working hours configured.
+     *
+     * @param User $staff
+     * @param Branch $branch
+     * @param Carbon $startUtc
+     * @param Carbon $endUtc
+     * @throws ValidationException
+     */
+    public function validateStaffWorkingHours(User $staff, Branch $branch, Carbon $startUtc, Carbon $endUtc): void
+    {
+        // Skip if staff has no working hours configured
+        if ($staff->working_start_time === null || $staff->working_end_time === null) {
+            return;
+        }
+
+        $timezone = $branch->timezone;
+        $startLocal = $startUtc->copy()->setTimezone($timezone);
+        $endLocal   = $endUtc->copy()->setTimezone($timezone);
+
+        // Build full datetime boundaries on the appointment's local date for correct midnight-crossing comparison
+        $staffStartDatetime = $startLocal->copy()->setTimeFromTimeString($staff->working_start_time);
+        $staffEndDatetime   = $startLocal->copy()->setTimeFromTimeString($staff->working_end_time);
+        // If working end is on or before working start, end is next day
+        if ($staffEndDatetime->lte($staffStartDatetime)) {
+            $staffEndDatetime->addDay();
+        }
+
+        $errors = [];
+
+        if ($startLocal->lt($staffStartDatetime)) {
+            $errors['start_datetime'][] = "Appointment start time is before {$staff->name}'s working hours ({$staff->working_start_time} {$timezone}).";
+        }
+
+        if ($endLocal->gt($staffEndDatetime)) {
+            $errors['end_datetime'][] = "Appointment end time is after {$staff->name}'s working hours ({$staff->working_end_time} {$timezone}).";
+        }
+
+        if (!empty($errors)) {
+            throw ValidationException::withMessages($errors);
         }
     }
 }

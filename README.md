@@ -136,12 +136,12 @@ The seeder also creates 3 branches, 6 services, 6 customers, and 10 appointments
 app/
 ├── Services/
 │   └── AppointmentService.php      ← Core business logic (create, update, transition)
-├── Rules/                           ← Reusable validation rules
-│   ├── OperatingHoursRule.php       ← Timezone-aware operating hours check
-│   ├── NoOverlapRule.php            ← Staff double-booking prevention (with row locking)
-│   ├── StaffBranchRule.php          ← Staff-branch assignment enforcement
-│   ├── ValidStatusTransitionRule.php← State machine transition validation
-│   └── E164PhoneRule.php            ← International phone format validation
+├── Rules/                           ← Standalone validation rule objects (used in Filament forms and tests)
+│   ├── E164PhoneRule.php            ← International phone format — used in BranchResource, CustomerResource, BookingForm
+│   ├── OperatingHoursRule.php       ← Timezone-aware operating hours check — tested independently, logic also in AppointmentService
+│   ├── NoOverlapRule.php            ← Staff double-booking detection — tested independently, logic also in AppointmentService
+│   ├── StaffBranchRule.php          ← Staff-branch assignment check — tested independently, logic also in AppointmentService
+│   └── ValidStatusTransitionRule.php← State machine transition validation — tested independently, logic also in AppointmentService
 ├── Enums/
 │   └── AppointmentStatus.php        ← Status enum with transition logic (canTransitionTo, isTerminal)
 ├── Policies/                        ← Authorization (admin full access, staff scoped)
@@ -218,6 +218,7 @@ User Input (assumed UTC)
 | **No soft deletes** | Entities are hard-deleted (with FK protection) | Simplifies queries; FK constraints prevent orphaned data |
 | **Memory on full test suite** | PHPUnit memory limit set to 512MB due to property tests | 15 property tests × 100+ iterations each accumulates memory; acceptable for CI |
 | **No API endpoints** | Only web UI (Filament + Livewire); no REST/GraphQL API | Could be added later; service layer is already decoupled from presentation |
+| **Duplicate validation logic** | `OperatingHoursRule`, `NoOverlapRule`, `StaffBranchRule`, `ValidStatusTransitionRule` exist as testable rule objects but `AppointmentService` also implements the same logic inline | Rules are used in property tests for isolated validation; service methods handle the actual runtime path |
 | **Customer deduplication** | Lookup-or-create matches by email first, then phone | Edge case: same person with different email/phone creates duplicate records |
 
 ---

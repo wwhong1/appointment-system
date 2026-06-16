@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password', 'role', 'branch_id'])]
+#[Fillable(['name', 'email', 'password', 'role', 'branch_id', 'working_start_time', 'working_end_time'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements FilamentUser
 {
@@ -32,6 +32,14 @@ class User extends Authenticatable implements FilamentUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * Check if this staff member has working hours configured.
+     */
+    public function hasWorkingHours(): bool
+    {
+        return $this->working_start_time !== null && $this->working_end_time !== null;
     }
 
     /**

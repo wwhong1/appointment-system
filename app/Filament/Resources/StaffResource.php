@@ -4,15 +4,19 @@ namespace App\Filament\Resources;
 
 use App\Enums\AppointmentStatus;
 use App\Filament\Resources\StaffResource\Pages;
+use App\Models\Branch;
 use App\Models\User;
+use Carbon\Carbon;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\TimePicker;
 use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -63,7 +67,82 @@ class StaffResource extends Resource
                     ->relationship('branch', 'name')
                     ->required()
                     ->searchable()
-                    ->preload(),
+                    ->preload()
+                    ->live()
+                    ->afterStateUpdated(function (Get $get, \Filament\Schemas\Components\Utilities\Set $set) {
+                        // Reset working hours when branch changes
+                        $set('working_start_time', null);
+                        $set('working_end_time', null);
+                    }),
+
+                TimePicker::make('working_start_time')
+                    ->label('Working Hours Start')
+                    ->nullable()
+                    ->seconds(false)
+                    ->helperText(function (Get $get): string {
+                        $branch = $get('branch_id') ? Branch::find($get('branch_id')) : null;
+                        if ($branch) {
+                            return "Must be at or after branch opening time ({$branch->opening_time}, {$branch->timezone}).";
+                        }
+                        return 'Optional. Select a branch first.';
+                    })
+                    ->rules([
+                        function (Get $get) {
+                            return function (string $attribute, $value, $fail) use ($get) {
+                                if (!$value) return;
+                                $branchId = $get('branch_id');
+                                if (!$branchId) return;
+                                $branch = Branch::find($branchId);
+                                if (!$branch) return;
+
+                                $staffTime = Carbon::parse($value)->format('H:i:s');
+                                $openingTime = Carbon::parse($branch->opening_time)->format('H:i:s');
+                                $closingTime = Carbon::parse($branch->closing_time)->format('H:i:s');
+
+                                if ($staffTime < $openingTime) {
+                                    $fail("Working hours start cannot be before branch opening time ({$branch->opening_time}).");
+                                }
+                                if ($staffTime >= $closingTime) {
+                                    $fail("Working hours start must be before branch closing time ({$branch->closing_time}).");
+                                }
+                            };
+                        },
+                    ]),
+
+                TimePicker::make('working_end_time')
+                    ->label('Working Hours End')
+                    ->nullable()
+                    ->seconds(false)
+                    ->helperText(function (Get $get): string {
+                        $branch = $get('branch_id') ? Branch::find($get('branch_id')) : null;
+                        if ($branch) {
+                            return "Must be at or before branch closing time ({$branch->closing_time}, {$branch->timezone}).";
+                        }
+                        return 'Optional. Both start and end must be set to enforce working hours.';
+                    })
+                    ->after('start_datetime')
+                    ->rules([
+                        function (Get $get) {
+                            return function (string $attribute, $value, $fail) use ($get) {
+                                if (!$value) return;
+                                $branchId = $get('branch_id');
+                                if (!$branchId) return;
+                                $branch = Branch::find($branchId);
+                                if (!$branch) return;
+
+                                $staffTime = Carbon::parse($value)->format('H:i:s');
+                                $openingTime = Carbon::parse($branch->opening_time)->format('H:i:s');
+                                $closingTime = Carbon::parse($branch->closing_time)->format('H:i:s');
+
+                                if ($staffTime > $closingTime) {
+                                    $fail("Working hours end cannot be after branch closing time ({$branch->closing_time}).");
+                                }
+                                if ($staffTime <= $openingTime) {
+                                    $fail("Working hours end must be after branch opening time ({$branch->opening_time}).");
+                                }
+                            };
+                        },
+                    ]),
             ]);
     }
 
@@ -81,6 +160,14 @@ class StaffResource extends Resource
 
                 TextColumn::make('branch.name')
                     ->label('Branch')
+                    ->sortable(),
+
+                TextColumn::make('working_start_time')
+                    ->label('Work Start')
+                    ->sortable(),
+
+                TextColumn::make('working_end_time')
+                    ->label('Work End')
                     ->sortable(),
             ])
             ->filters([
